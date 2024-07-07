@@ -6,25 +6,46 @@ from decoder import VAE_AttentionBlock, VAE_ResidualBlock
 '''
     ### encoder.py Explained ### 
 
-This script contains the encoder part of the Variational Auto Encoder (VAE) and also the sampling part so when you take the image run it through the encoder to make it smaller you obtain a mean and a variance. Then we sample from the distribution to give us the mean and the variance.
+This script implements the encoder component of the Variational Autoencoder (VAE), which is responsible for compressing input images into a latent space representation. The encoder processes the input image to generate a mean and a variance, from which samples are drawn to obtain the latent representation.
 
-The main purpose of the encoder.py is to encode an image(ImageToImage)/random noise(TextToImage) into a compressed representation of this image/randomNoise.
-This is so we can take this new latent representation and run it through the UNet model to learn how to denoise the image as part of the reverse process.
-x (pixel space)-> z(latent space)
+The primary purpose of this script is to encode an image (for Image-to-Image tasks) or random noise (for Text-to-Image tasks) into a compressed latent representation. This latent representation is subsequently used by the UNet model to learn how to denoise the image as part of the reverse diffusion process.
+x (pixel space) -> z (latent space)
 
-The encoders job is to reduce the higher dimensional representation of the data into a lower dimensional representation of the data.
+The encoder's role is to reduce the high-dimensional input data into a lower-dimensional representation. Notably, at each stage, the number of channels in the data increases while its height and width decrease.
 
-Interestingly at each step, we are increasing the number of channels in the data but reducing its height and width
-
-so we start for each pixel with 3 channels (red,blue,green RGB) but then by using convolutions we reduce the size of the image but simaltenously we increase the number of features that each pixels represents.
-Hence each pixel will actually capture more data than originally. 
+Initially, each pixel in the image has three channels (RGB). Through the application of convolutions, the spatial dimensions of the image are reduced while the number of features per pixel increases. Consequently, each pixel in the transformed image captures more information than in the original.
 
 '''
 
 
 
 class VAE_Encoder(nn.Sequential):
+    '''
+    This class defines the Variational Autoencoder (VAE) Encoder. It inherits from nn.Sequential, 
+    stacking various convolutional and residual blocks to transform an input image into a latent 
+    space representation. The encoder reduces the spatial dimensions while increasing the depth 
+    (number of channels), thereby compressing the information.
+
+    Attributes:
+        The layers of the encoder include:
+        - Convolutional layers with increasing depth
+        - Residual blocks to maintain information
+        - Attention blocks for better feature representation
+        - Group normalization and activation functions for stability and non-linearity
+    '''
     def __init__(self):
+        '''
+        Initializes the VAE_Encoder with a sequence of layers. Each layer performs specific 
+        transformations, including convolutions, residual connections, attention mechanisms, 
+        and normalization.
+
+        The layers defined are:
+        - Convolutional layers to downsample the image and increase channel depth
+        - VAE_ResidualBlock to preserve information and aid in gradient flow
+        - VAE_AttentionBlock to capture dependencies across different parts of the image
+        - GroupNorm for stabilizing the training and improving convergence
+        - SiLU activation function for non-linear transformations
+        '''
         super().__init__(
 
             #(batch size, channel, height, width) -> (batch size, 128, height, width)
@@ -89,6 +110,24 @@ class VAE_Encoder(nn.Sequential):
         )
 
     def forward(self, x: torch.Tensor, noise: torch.Tensor) -> torch.Tensor:
+        '''
+        Forward pass through the VAE_Encoder.
+
+        Inputs:
+        - x (torch.Tensor): The input tensor with shape (batch_size, channel, height, width).
+        - noise (torch.Tensor): Random noise tensor with shape (batch_size, 4, height/8, width/8).
+
+        Purpose:
+        The forward method processes the input image through the defined layers sequentially. 
+        It performs padding during downsampling to maintain spatial dimensions, applies 
+        convolutions and residual connections, and finally splits the output into mean and 
+        log_variance. It then calculates the standard deviation and generates the latent 
+        representation by sampling from a normal distribution scaled by the mean and variance.
+
+        Output:
+        - torch.Tensor: The latent representation of the input image with the same spatial dimensions 
+          as the input noise but with compressed feature representation.
+        '''
         # x: (batch_size, channel, height, width)
         # noise: (batch_size, 4, height/8, width/8)
 
@@ -127,4 +166,3 @@ class VAE_Encoder(nn.Sequential):
         x *= 0.18215
 
         return x
-
