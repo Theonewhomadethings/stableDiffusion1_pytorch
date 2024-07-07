@@ -8,13 +8,54 @@ HEIGHT = 512
 LATENT_WIDTH = WIDTH // 8
 LATENT_HEIGHT = HEIGHT // 8 
 
+"""
+    ### pipeline.py Explained ###
+
+    This script is a core component of the Stable Diffusion implementation. It orchestrates the entire process of generating images from text prompts or input images using diffusion models. 
+    The script leverages several models and techniques, including CLIP for text embeddings, a UNet-based diffusion model, and DDPMSampler for the diffusion process. 
+    Here is a breakdown of the functionalities:
+
+    - **generate Function**:
+        This is the main function that generates images based on various inputs and parameters. It performs the following steps:
+
+        1. **Input Validation**: 
+            Ensures that the `strength` parameter is within the valid range.
+
+        2. **Random Generator Initialization**: 
+            Initializes a random number generator with a given seed for reproducibility.
+
+        3. **Model Setup**: 
+            Loads the CLIP model and moves it to the specified device (CPU or GPU). Depending on the classifier-free guidance (`do_cfg`), it processes the text prompt and optionally an unconditional prompt to create text embeddings using CLIP.
+
+        4. **Sampler Initialization**: 
+            Initializes the DDPMSampler and sets the number of inference steps.
+
+        5. **Latent Initialization**: 
+            If an input image is provided, it is encoded into a latent space representation using the encoder model. Noise is added to this latent representation based on the `strength` parameter. If no input image is provided, random latents are initialized.
+
+        6. **Diffusion Process**: 
+            Moves the diffusion model to the specified device. Iterates over the timesteps to progressively denoise the latent representation. Uses the diffusion model to predict and remove noise at each step. If classifier-free guidance is enabled, adjusts the model output accordingly.
+
+        7. **Decoding**: 
+            Moves the decoder model to the specified device and decodes the final latent representation back into an image. The image tensor is then rescaled from latent space to pixel space and converted to a NumPy array for output.
+
+    - **Helper Functions**:
+        - `rescale`: Rescales tensor values from an old range to a new range, with optional clamping.
+        - `get_time_embedding`: Generates a time embedding tensor for a given timestep.
+
+    The generate function is highly configurable, allowing for various modes of operation such as text-to-image generation, image-to-image translation, and the use of classifier-free guidance. It integrates multiple models and components seamlessly to produce high-quality images based on the given prompts and input parameters.
+
+    This script is designed to be used as part of a larger pipeline for generating images using Stable Diffusion.
+"""
+
+
 def generate(
         prompt,
         uncond_prompt=None, # negative prompt or empty strinng
         input_image=None,  # image to image 
         strength=0.8, # how much noise is added to latent input image when image to image
         do_cfg=True, # if you want classifier free guidance 
-        cfg_scale=7.5, 
+        cfg_scale=7.5,  # weight of how much you wnat the model to pay attention to the prompt value goes from 1 -> 14 
         sampler_name="ddpm",
         n_inference_steps=50, # timesteps for scheduler 1000 = 50 * 20 so 50 intervals of 20 1000, 980, 960 .... 0
         models={},
@@ -181,13 +222,3 @@ def get_time_embedding(timestep):
    
     # Shape: (1, 160 * 2)
     return torch.cat([torch.cos(x), torch.sin(x)], dim=-1)
-
-
-
-
-
-
-
-
-
-
