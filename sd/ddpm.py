@@ -1,6 +1,28 @@
 import torch
 import numpy as np
 
+'''
+    ### ddpm.py Explained ###
+
+    This script provides a software implementation of the DDPM (Denoising Diffusion Probabilistic Model) sampler, based on the paper "Denoising Diffusion Probabilistic Models" (https://arxiv.org/pdf/2006.11239.pdf). The DDPM sampler is used to define the forward and reverse processes in the latent diffusion model.
+
+    Key components and functionalities of the DDPM sampler include:
+
+    - **Linear Beta Schedule**: The beta schedule defines the variance of noise added at each timestep during the forward diffusion process. This schedule is specified by the `beta_start` and `beta_end` parameters, which are values adopted from the original Stable Diffusion model by the CompVis group (https://github.com/CompVis/stable-diffusion).
+
+    - **Forward and Reverse Processes**: The UNet model predicts the noise in an image, and the DDPM sampler provides the mechanism to iteratively add and remove noise based on the beta schedule. This iterative process enables the generation of high-quality images from noise.
+
+    - **Functions**:
+        - `set_inference_timesteps`: Configures the number of timesteps for the inference process, determining how the diffusion process is discretized.
+        - `_get_previous_timesteps`: Calculates the previous timestep given the current timestep.
+        - `_get_variance`: Computes the variance for the noise to be added during the reverse diffusion process.
+        - `set_strength`: Adjusts the strength of the noise added to the input image, controlling how much the output deviates from the input.
+        - `step`: Performs a single step in the reverse diffusion process, removing predicted noise from the latent representation.
+        - `add_noise`: Adds noise to the original samples based on the beta schedule, simulating the forward diffusion process.
+
+    The DDPM sampler is crucial for the stable diffusion architecture, enabling the transformation of random noise into coherent images guided by learned noise patterns.
+'''
+
 class DDPMSampler:
 
     def __init__(
@@ -10,6 +32,15 @@ class DDPMSampler:
       beta_start: float = 0.0085,
       beta_end: float = 0.0120
     ):
+        """
+        Initializes the DDPMSampler with a given random generator, number of training steps, and beta schedule.
+        
+        Args:
+            generator (torch.Generator): Random number generator for noise sampling.
+            num_training_steps (int): Number of steps in the training process.
+            beta_start (float): Initial value of the beta schedule.
+            beta_end (float): Final value of the beta schedule.
+        """
         self.betas = torch.linspace(beta_start**0.5, beta_end**0.5, num_training_steps, dtype=torch.float32)**2
         self.alphas = 1 - self.betas
         self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
@@ -21,16 +52,40 @@ class DDPMSampler:
         self.timesteps = torch.from_numpy(np.arange(0, num_training_steps)[::-1].copy())
     
     def set_inference_timesteps(self, num_inference_steps=50):
+        """
+        Configures the number of timesteps for the inference process.
+        
+        Args:
+            num_inference_steps (int): Number of timesteps for the inference process.
+        """
         self.num_inference_steps = num_inference_steps
         step_ratio = self.num_train_timesteps // self.num_inference_steps
         timesteps = (np.arange(0, num_inference_steps) * step_ratio).round()[::-1].copy().astype(np.int64)
         self.timesteps = torch.from_numpy(timesteps)
     
     def _get_previous_timesteps(self, timestep: int) -> int:
+        """
+        Calculates the previous timestep given the current timestep.
+        
+        Args:
+            timestep (int): The current timestep.
+        
+        Returns:
+            int: The previous timestep.
+        """
         prev_t = timestep - self.num_train_timesteps // self.num_inference_steps
         return prev_t
     
     def _get_variance(self, timestep: int) -> torch.Tensor:
+        """
+        Computes the variance for the noise to be added during the reverse diffusion process.
+        
+        Args:
+            timestep (int): The current timestep.
+        
+        Returns:
+            torch.Tensor: The computed variance.
+        """
         prev_t = self._get_previous_timesteps(timestep)
 
         alpha_prod_t = self.alphas_cumprod[timestep]
@@ -61,6 +116,17 @@ class DDPMSampler:
              timestep: int,
              latents: torch.Tensor,
              model_output: torch.Tensor):
+        """
+        Performs a single step in the reverse diffusion process, removing predicted noise from the latent representation.
+        
+        Args:
+            timestep (int): The current timestep.
+            latents (torch.Tensor): The latent representation at the current timestep.
+            model_output (torch.Tensor): The model's predicted noise.
+        
+        Returns:
+            torch.Tensor: The latent representation at the previous timestep.
+        """
         
         t = timestep
         prev_t = self._get_previous_timesteps(t)
@@ -106,6 +172,16 @@ class DDPMSampler:
                   original_samples: torch.FloatTensor,
                   timesteps: torch.IntTensor
                   ) -> torch.FloatTensor:
+        """
+        Adds noise to the original samples based on the beta schedule, simulating the forward diffusion process.
+        
+        Args:
+            original_samples (torch.FloatTensor): The original samples.
+            timesteps (torch.IntTensor): The timesteps at which to add noise.
+        
+        Returns:
+            torch.FloatTensor: The noisy samples.
+        """
         alphas_cumprod = self.alphas_cumprod.to(device=original_samples.device, dtype =original_samples.dtype)
         timesteps = timesteps.to(original_samples.device)
 
