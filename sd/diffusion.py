@@ -3,15 +3,56 @@ from torch import nn
 from torch.nn import functional as F
 from attention import SelfAttention, CrossAttention
 
+'''
+    ### diffusion.py Explained ###
+
+    This script implements the core components of the UNet model within the stable diffusion architecture, including the time embedding, UNet residual blocks, and UNet attention blocks. (UNet first paper, https://arxiv.org/abs/1505.04597), (UNet attention first paper, https://arxiv.org/abs/1804.03999)
+
+    The UNet model plays a crucial role in the stable diffusion process by predicting the noise present in a given image and determining how to remove it. This is essential for reconstructing the image from its noisy version through a reverse diffusion process, while the forward process is governed by a predefined schedule, such as DDPM (Denoising Diffusion Probabilistic Models, https://arxiv.org/abs/2006.11239).
+
+    The UNet model requires not only the noisy image at a specific timestep but also the textual prompt that guides the generation process. This integration of image and text information is facilitated by the CrossAttention mechanism, which computes attention between two sequences, combining image and text modalities. Cross attention ensures that the model understands the relationship between the prompt and the noisy image, enabling accurate reconstruction of the desired output.
+
+    Key components in this script include:
+    - TimeEmbedding: Encodes the timestep information.
+    - UNET_ResidualBlock: Processes the image features and integrates time embeddings.
+    - UNET_AttentionBlock: Applies both self-attention and cross-attention mechanisms.
+    - SwitchSequential: Manages the sequence of operations in the UNet.
+    - UNET: Constructs the entire UNet model.
+    - UNET_OutputLayer: Final layer that produces the output image.
+    - Diffusion: Combines the UNet and other components to perform the denoising process.
+'''
+
 
 class TimeEmbedding(nn.Module):
+    '''
+    Encodes the timestep information into a higher dimensional space using two linear layers.
+
+    Attributes:
+        linear_1 (nn.Linear): First linear layer to project the input.
+        linear_2 (nn.Linear): Second linear layer to further transform the projection.
+    '''
     def __init__(self, n_embd):
+        '''
+        Initializes the TimeEmbedding with the specified embedding size.
+
+        Args:
+            n_embd (int): Dimensionality of the input embedding.
+        '''
         super().__init__()
 
         self.linear_1 = nn.Linear(n_embd, 4*n_embd)
         self.linear_2 = nn.Linear(4*n_embd, 4*n_embd)
 
     def forward(self, x):
+        '''
+        Forward pass to transform the timestep embedding.
+
+        Args:
+            x (torch.Tensor): Input tensor with shape (1, n_embd).
+
+        Returns:
+            torch.Tensor: Transformed tensor with shape (1, 4 * n_embd).
+        '''
 
         # x: (1, 320)
 
@@ -27,7 +68,26 @@ class TimeEmbedding(nn.Module):
         return x
     
 class UNET_ResidualBlock(nn.Module):
+    '''
+    Processes image features and integrates time embeddings using residual connections.
+
+    Attributes:
+        groupnorm_feature (nn.GroupNorm): Group normalization for feature normalization.
+        conv_feature (nn.Conv2d): Convolutional layer for feature processing.
+        linear_time (nn.Linear): Linear layer to transform the time embedding.
+        groupnorm_merged (nn.GroupNorm): Group normalization after merging features and time.
+        conv_merged (nn.Conv2d): Convolutional layer after merging features and time.
+        residual_layer (nn.Module): Identity or convolution layer for residual connection.
+    '''
     def __init__(self, in_channels, out_channels, n_time=1280):
+        '''
+        Initializes the UNET_ResidualBlock with specified input and output channels.
+
+        Args:
+            in_channels (int): Number of input channels.
+            out_channels (int): Number of output channels.
+            n_time (int): Dimensionality of the time embedding.
+        '''
         super().__init__()
         self.groupnorm_feature = nn.GroupNorm(32, in_channels)
         self.conv_feature = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
@@ -43,6 +103,16 @@ class UNET_ResidualBlock(nn.Module):
 
     
     def forward(self, feature, time):
+        '''
+        Forward pass to process features and integrate time embeddings.
+
+        Args:
+            feature (torch.Tensor): Feature tensor with shape (batch_size, in_channels, height, width).
+            time (torch.Tensor): Time embedding tensor with shape (1, n_time).
+
+        Returns:
+            torch.Tensor: Output tensor with the same shape as the feature input.
+        '''
         # feature: (Batch_Size, In_Channels, Height, Width)
         # time: (1, 1280)
 
@@ -81,7 +151,30 @@ class UNET_ResidualBlock(nn.Module):
 
     
 class UNET_AttentionBlock(nn.Module):
+    '''
+    Applies both self-attention and cross-attention mechanisms with residual connections.
+
+    Attributes:
+        groupnorm (nn.GroupNorm): Group normalization for feature normalization.
+        conv_input (nn.Conv2d): Convolutional layer for initial feature processing.
+        layernorm_1 (nn.LayerNorm): Layer normalization before self-attention.
+        attention_1 (SelfAttention): Self-attention mechanism.
+        layernorm_2 (nn.LayerNorm): Layer normalization before cross-attention.
+        attention_2 (CrossAttention): Cross-attention mechanism.
+        layernorm_3 (nn.LayerNorm): Layer normalization before feed-forward network.
+        linear_geglu_1 (nn.Linear): First linear layer with GeGLU activation.
+        linear_geglu_2 (nn.Linear): Second linear layer in the feed-forward network.
+        conv_output (nn.Conv2d): Convolutional layer for final feature processing.
+    '''
     def __init__(self, n_head: int, n_embd: int, d_context=768):
+        '''
+        Initializes the UNET_AttentionBlock with specified number of heads, embedding dimension, and context dimension.
+
+        Args:
+            n_head (int): Number of attention heads.
+            n_embd (int): Dimensionality of the embeddings.
+            d_context (int): Dimensionality of the context.
+        '''
         super().__init__()
         channels = n_head * n_embd
         
@@ -99,6 +192,16 @@ class UNET_AttentionBlock(nn.Module):
         self.conv_output = nn.Conv2d(channels, channels, kernel_size=1, padding=0)
 
     def forward(self, x, context):
+        '''
+        Forward pass through the attention block.
+
+        Args:
+            x (torch.Tensor): Feature tensor with shape (batch_size, features, height, width).
+            context (torch.Tensor): Context tensor with shape (batch_size, seq_len, dim).
+
+        Returns:
+            torch.Tensor: Output tensor with the same shape as the feature input.
+        '''
         # x: (Batch_Size, Features, Height, Width)
         # context: (Batch_Size, Seq_Len, Dim)
 
@@ -178,17 +281,54 @@ class UNET_AttentionBlock(nn.Module):
         return self.conv_output(x) + residue_long
 
 class Upsample(nn.Module):
+    '''
+    Upsamples the input tensor by a factor of 2 using nearest neighbor interpolation followed by a convolution.
+
+    Attributes:
+        conv (nn.Conv2d): Convolutional layer to refine the upsampled features.
+    '''
     def __init__(self, channels):
+        '''
+        Initializes the Upsample layer with specified number of channels.
+
+        Args:
+            channels (int): Number of input and output channels.
+        '''
         super().__init__()
         self.conv = nn.Conv2d(channels, channels, kernel_size = 3, padding = 1)
 
     def forward(self, x):
+        '''
+        Forward pass to upsample the input tensor.
+
+        Args:
+            x (torch.Tensor): Input tensor with shape (batch_size, channels, height, width).
+
+        Returns:
+            torch.Tensor: Upsampled tensor with shape (batch_size, channels, height*2, width*2).
+        '''
         x = F.interpolate(x, scale_factor = 2, mode = "nearest")
         return self.conv(x)
 
 
 class SwitchSequential(nn.Sequential):
+    '''
+    Custom sequential layer that handles different types of layers, including attention and residual blocks.
+
+    This allows dynamic handling of inputs based on the type of the layer (e.g., applying attention with context).
+    '''
     def forward(self, x, context, time):
+        '''
+        Forward pass through the layers, applying context and time where necessary.
+
+        Args:
+            x (torch.Tensor): Input tensor.
+            context (torch.Tensor): Context tensor for cross-attention.
+            time (torch.Tensor): Time embedding tensor.
+
+        Returns:
+            torch.Tensor: Output tensor after passing through the sequential layers.
+        '''
         for layer in self:
             if (isinstance(layer, UNET_AttentionBlock)):
                 x = layer(x, context)
@@ -199,6 +339,31 @@ class SwitchSequential(nn.Sequential):
             return x
     
 class UNET(nn.Module):
+    '''
+    Constructs the entire UNet model, including encoding, bottleneck, and decoding stages.
+
+    The UNet architecture in this implementation consists of:
+    - 12 encoding layers that progressively reduce the spatial dimensions and increase the number of feature channels.
+    - 3 bottleneck layers that process the most compressed representation.
+    - 12 decoding layers that progressively increase the spatial dimensions and reduce the number of feature channels, ultimately restoring the original resolution.
+
+    Encoder:
+        Input: (Batch_Size, 4, Height / 8, Width / 8)
+        Output: (Batch_Size, 1280, Height / 64, Width / 64)
+
+    Bottleneck:
+        Input: (Batch_Size, 1280, Height / 64, Width / 64)
+        Output: (Batch_Size, 1280, Height / 64, Width / 64)
+
+    Decoder:
+        Input: (Batch_Size, 1280, Height / 64, Width / 64)
+        Output: (Batch_Size, 4, Height / 8, Width / 8)
+
+    Attributes:
+        encoders (nn.ModuleList): List of encoding layers that reduce spatial dimensions and increase feature channels.
+        bottleneck (SwitchSequential): Bottleneck layers that process the most compressed representation of the input.
+        decoders (nn.ModuleList): List of decoding layers that increase spatial dimensions and reduce feature channels to restore the original resolution.
+    '''
     def __init__(self):
         super().__init__()
 
@@ -290,6 +455,13 @@ class UNET(nn.Module):
         ])
 
 class UNET_OutputLayer(nn.Module):
+    '''
+    Final output layer for the UNet model, applying normalization and a convolution.
+
+    Attributes:
+        groupnorm (nn.GroupNorm): Group normalization for feature normalization.
+        conv (nn.Conv2d): Convolutional layer to produce the final output.
+    '''
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.groupnorm = nn.GroupNorm(32, in_channels)
@@ -312,6 +484,14 @@ class UNET_OutputLayer(nn.Module):
         return x
 
 class Diffusion(nn.Module):
+    '''
+    Diffusion model that combines the UNet, time embedding, and final output layer.
+
+    Attributes:
+        time_embedding (TimeEmbedding): Encodes the timestep information.
+        unet (UNET): UNet model for processing the noisy image and context.
+        final (UNET_OutputLayer): Produces the final denoised image.
+    '''
     def __init__(self):
         super().__init__()
                               #TimeEmbedding(size)
@@ -336,23 +516,3 @@ class Diffusion(nn.Module):
         output = self.final(output)
 
         return output
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
